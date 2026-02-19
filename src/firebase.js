@@ -11,6 +11,6 @@ const firebaseConfig = {
 };
 
 // Admin email(s) who can see all staff records
-export const ADMIN_EMAILS = ["scottchue@gmail.com"];
+export const ADMIN_EMAILS = ["scottchue.sk@gmail.com"];
 
 export default firebaseConfig;
