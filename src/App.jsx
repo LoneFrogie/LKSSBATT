@@ -131,7 +131,7 @@ function StaffDashboard({ user }) {
     try {
       const today = getTodayDate();
       
-      // Get today's record
+      // Get today's record - simple query
       const q = query(
         collection(db, 'attendance'),
         where('userId', '==', user.uid),
@@ -145,15 +145,23 @@ function StaffDashboard({ user }) {
         setTodayRecord(null);
       }
 
-      // Get recent records
+      // Get all recent records - will filter in JS
       const recentQ = query(
         collection(db, 'attendance'),
-        where('userId', '==', user.uid),
-        orderBy('date', 'desc'),
-        orderBy('timeIn', 'desc')
+        where('userId', '==', user.uid)
       );
       const recentSnapshot = await getDocs(recentQ);
-      setRecentRecords(recentSnapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+      let records = recentSnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+      
+      // Sort in JavaScript
+      records.sort((a, b) => {
+        if (a.date !== b.date) return b.date.localeCompare(a.date);
+        const aTime = a.timeIn?.toDate?.()?.getTime() || 0;
+        const bTime = b.timeIn?.toDate?.()?.getTime() || 0;
+        return bTime - aTime;
+      });
+      
+      setRecentRecords(records);
     } catch (error) {
       console.error('Error loading data:', error);
     }
@@ -324,18 +332,28 @@ function AdminPanel({ user }) {
   const loadRecords = async () => {
     setLoading(true);
     try {
+      // Simplified query - get all records in date range without composite index
       const q = query(
         collection(db, 'attendance'),
         where('date', '>=', startDate),
-        where('date', '<=', endDate),
-        orderBy('date', 'desc'),
-        orderBy('timeIn', 'desc')
+        where('date', '<=', endDate)
       );
       
       const snapshot = await getDocs(q);
-      setRecords(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+      let records = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+      
+      // Sort in JavaScript instead of Firestore
+      records.sort((a, b) => {
+        if (a.date !== b.date) return b.date.localeCompare(a.date);
+        const aTime = a.timeIn?.toDate?.()?.getTime() || 0;
+        const bTime = b.timeIn?.toDate?.()?.getTime() || 0;
+        return bTime - aTime;
+      });
+      
+      setRecords(records);
     } catch (error) {
       console.error('Error loading records:', error);
+      alert('Error loading records: ' + error.message);
     }
     setLoading(false);
   };
