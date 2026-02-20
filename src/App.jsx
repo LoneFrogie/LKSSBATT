@@ -359,34 +359,37 @@ function AdminPanel({ user }) {
   };
 
   const exportToExcel = () => {
+    // Format for Timesheet - matches your Excel structure
     const data = records.map(record => ({
-      'Name': record.name,
-      'Email': record.email,
       'Date': record.date,
-      'Time In': record.timeIn ? formatTime(record.timeIn) : '-',
-      'Time Out': record.timeOut ? formatTime(record.timeOut) : '-',
+      'STAFF': record.name,
+      'IN': record.timeIn ? formatTime(record.timeIn) : '',
+      'OUT': record.timeOut ? formatTime(record.timeOut) : '',
       'Location In': record.locationIn ? 
-        `${record.locationIn.city}${record.locationIn.area ? `, ${record.locationIn.area}` : ''}` : '-',
+        `${record.locationIn.city}${record.locationIn.area ? `, ${record.locationIn.area}` : ''}` : '',
       'Location Out': record.locationOut ? 
-        `${record.locationOut.city}${record.locationOut.area ? `, ${record.locationOut.area}` : ''}` : '-'
+        `${record.locationOut.city}${record.locationOut.area ? `, ${record.locationOut.area}` : ''}` : ''
     }));
 
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Attendance');
+    XLSX.utils.book_append_sheet(wb, ws, 'Timesheet');
     
-    // Set column widths
+    // Set column widths matching your Timesheet
     ws['!cols'] = [
-      { wch: 20 }, // Name
-      { wch: 30 }, // Email
       { wch: 12 }, // Date
-      { wch: 10 }, // Time In
-      { wch: 10 }, // Time Out
+      { wch: 20 }, // STAFF
+      { wch: 10 }, // IN
+      { wch: 10 }, // OUT
       { wch: 25 }, // Location In
       { wch: 25 }, // Location Out
     ];
 
-    XLSX.writeFile(wb, `attendance_${startDate}_to_${endDate}.xlsx`);
+    // Filename with month/year for easy identification
+    const monthYear = startDate ? 
+      new Date(startDate).toLocaleString('en-MY', { month: 'long', year: 'numeric' }) : 
+      'attendance';
+    XLSX.writeFile(wb, `Timesheet_${monthYear}.xlsx`);
   };
 
   if (loading) {
