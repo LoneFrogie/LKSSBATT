@@ -278,28 +278,29 @@ function StaffDashboard({ user }) {
         
         // If clock out is on a different date than clock in, split into two records
         if (clockInDate !== today) {
-          // First record: from clock-in time to midnight of clock-in date
-          const midnightOfClockInDay = new Date(clockInDate + 'T23:59:59');
+          // First record: from clock-in time to midnight of clock-in date (11:59:59)
+          const endOfClockInDay = new Date(clockInDate);
+          endOfClockInDay.setHours(23, 59, 59, 999);
           
           await updateDoc(doc(db, 'attendance', todayRecord.id), {
-            timeOut: midnightOfClockInDay,
+            timeOut: endOfClockInDay,
             locationOut: locationInfo
           });
           
-          // Second record: from midnight of next day to clock-out time
-          const nextDayMidnight = new Date(clockInDate + 'T00:00:00');
-          nextDayMidnight.setDate(nextDayMidnight.getDate() + 1);
+          // Second record: from midnight of clock-out day to clock-out time
+          const startOfToday = new Date(today);
+          startOfToday.setHours(0, 0, 0, 0);
           
           const secondRecord = {
             userId: user.uid,
             email: user.email,
             name: user.displayName,
-            date: today, // This is actually the clock-out date
-            timeIn: nextDayMidnight,
-            timeOut: timeToRecord,  // Use rounded time
-            locationIn: locationInfo, // Use same location for simplicity
+            date: today,
+            timeIn: startOfToday,
+            timeOut: timeToRecord,
+            locationIn: locationInfo,
             locationOut: locationInfo,
-            originalTimeOut: now,   // Store original time for reference
+            originalTimeOut: now,
             createdAt: serverTimestamp()
           };
           
