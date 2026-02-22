@@ -42,6 +42,43 @@ const formatTime = (timestamp) => {
   return date.toLocaleTimeString('en-MY', { hour: '2-digit', minute: '2-digit' });
 };
 
+// Helper: Round time based on location (Ampang special rule)
+const roundTimeForLocation = (date, locationId = '') => {
+  const location = (locationId || '').toLowerCase();
+  
+  // Only apply rounding for Ampang locations
+  if (!location.includes('ampang')) {
+    return date; // Return exact time for non-Ampang locations
+  }
+  
+  const hours = date.getHours();
+  const minutes = date.getMinutes();
+  
+  // Only apply for early morning shift (before 8am)
+  if (hours < 7 || hours >= 8) {
+    return date; // Exact time for 8am onwards
+  }
+  
+  // Ampang early morning rounding rules
+  if (hours === 7) {
+    if (minutes <= 5) {
+      // 7:00 - 7:05 → 7:00
+      return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 7, 0, 0);
+    } else if (minutes <= 15) {
+      // 7:06 - 7:15 → 7:15
+      return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 7, 15, 0);
+    } else if (minutes <= 30) {
+      // 7:16 - 7:30 → 7:30
+      return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 7, 30, 0);
+    } else {
+      // 7:31 - 7:59 → 8:00
+      return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 8, 0, 0);
+    }
+  }
+  
+  return date;
+};
+
 // Helper: Get location info
 const getLocationInfo = async (position) => {
   const { latitude, longitude } = position.coords;
@@ -53,7 +90,9 @@ const getLocationInfo = async (position) => {
     const address = data.address || {};
     const city = address.city || address.town || address.village || address.county || 'Unknown';
     const area = address.suburb || address.neighbourhood || address.hamlet || '';
-    return { lat: latitude, lng: longitude, city, area };
+    // Use area as locationId for Ampang detection
+    const locationId = area || '';
+    return { lat: latitude, lng: longitude, city, area: locationId };
   } catch (error) {
     console.error('Geocoding error:', error);
     return { lat: latitude, lng: longitude, city: 'Unknown', area: '' };
@@ -131,7 +170,7 @@ function StaffDashboard({ user }) {
     try {
       const today = getTodayDate();
       
-      // Get today's record - simple query
+      // Get today's records - there can be multiple sessions
       const q = query(
         collection(db, 'attendance'),
         where('userId', '==', user.uid),
@@ -140,7 +179,14 @@ function StaffDashboard({ user }) {
       const snapshot = await getDocs(q);
       
       if (!snapshot.empty) {
-        setTodayRecord({ id: snapshot.docs[0].id, ...snapshot.docs[0].data() });
+        // Find the active session (where timeOut is null)
+        const activeRecord = snapshot.docs.find(doc => !doc.data().timeOut);
+        if (activeRecord) {
+          setTodayRecord({ id: activeRecord.id, ...activeRecord.data() });
+        } else {
+          // All sessions closed - show the last one
+          setTodayRecord({ id: snapshot.docs[0].id, ...snapshot.docs[0].data() });
+        }
       } else {
         setTodayRecord(null);
       }
@@ -177,18 +223,48 @@ function StaffDashboard({ user }) {
       
       const now = new Date();
       const today = getTodayDate();
+      const currentHour = now.getHours();
+      
+      // Apply time rounding based on location
+      const roundedTime = roundTimeForLocation(now, locationInfo.area);
+      const roundedHour = roundedTime.getHours();
+      const roundedMinutes = roundedTime.getMinutes();
+      
+      // For display: show original time, but record rounded time
+      const timeToRecord = roundedTime;
+      
+      // Check lunch blocking (12pm - 1pm)
+      if (currentHour >= 12 && currentHour < 13) {
+        alert('Clock in/out is not allowed during lunch hour (12:00 PM - 1:00 PM).');
+        setClocking(false);
+        return;
+      }
       
       if (type === 'clockIn') {
-        // Create new attendance record
+        // Check if there's a recent clock-out (must wait 1 hour)
+        if (todayRecord?.timeOut) {
+          const lastClockOut = todayRecord.timeOut.toDate ? todayRecord.timeOut.toDate() : new Date(todayRecord.timeOut);
+          const hoursSinceClockOut = (now - lastClockOut) / (1000 * 60 * 60);
+          
+          if (hoursSinceClockOut <= 1) {
+            // Less than 1 hour since clock out - not allowed yet
+            alert('You must wait 1 hour after clocking out before starting a new session.');
+            setClocking(false);
+            return;
+          }
+        }
+        
+        // Normal clock in - create new attendance record (with rounded time)
         const newRecord = {
           userId: user.uid,
           email: user.email,
           name: user.displayName,
           date: today,
-          timeIn: now,
+          timeIn: timeToRecord,  // Use rounded time
           timeOut: null,
           locationIn: locationInfo,
           locationOut: null,
+          originalTimeIn: now,   // Store original time for reference
           createdAt: serverTimestamp()
         };
         
@@ -196,15 +272,51 @@ function StaffDashboard({ user }) {
         await setDoc(docRef, newRecord);
         setTodayRecord({ id: docRef.id, ...newRecord });
       } else {
-        // Update existing record
-        await updateDoc(doc(db, 'attendance', todayRecord.id), {
-          timeOut: now,
-          locationOut: locationInfo
-        });
+        // Clock out - check if overnight split needed
+        const clockInTime = todayRecord.timeIn.toDate ? todayRecord.timeIn.toDate() : new Date(todayRecord.timeIn);
+        const clockInDate = clockInTime.toISOString().split('T')[0];
+        
+        // If clock out is on a different date than clock in, split into two records
+        if (clockInDate !== today) {
+          // First record: from clock-in time to midnight of clock-in date
+          const midnightOfClockInDay = new Date(clockInDate + 'T23:59:59');
+          
+          await updateDoc(doc(db, 'attendance', todayRecord.id), {
+            timeOut: midnightOfClockInDay,
+            locationOut: locationInfo
+          });
+          
+          // Second record: from midnight of next day to clock-out time
+          const nextDayMidnight = new Date(clockInDate + 'T00:00:00');
+          nextDayMidnight.setDate(nextDayMidnight.getDate() + 1);
+          
+          const secondRecord = {
+            userId: user.uid,
+            email: user.email,
+            name: user.displayName,
+            date: today, // This is actually the clock-out date
+            timeIn: nextDayMidnight,
+            timeOut: timeToRecord,  // Use rounded time
+            locationIn: locationInfo, // Use same location for simplicity
+            locationOut: locationInfo,
+            originalTimeOut: now,   // Store original time for reference
+            createdAt: serverTimestamp()
+          };
+          
+          const docRef2 = doc(collection(db, 'attendance'));
+          await setDoc(docRef2, secondRecord);
+        } else {
+          // Normal clock out - same day (with rounded time)
+          await updateDoc(doc(db, 'attendance', todayRecord.id), {
+            timeOut: timeToRecord,  // Use rounded time
+            locationOut: locationInfo,
+            originalTimeOut: now    // Store original time for reference
+          });
+        }
         
         setTodayRecord(prev => ({
           ...prev,
-          timeOut: now,
+          timeOut: timeToRecord,   // Use rounded time
           locationOut: locationInfo
         }));
       }
@@ -222,6 +334,10 @@ function StaffDashboard({ user }) {
   }
 
   const isClockedIn = todayRecord && !todayRecord.timeOut;
+  
+  // Check if can clock in again (AFTER 1 hour of clock out)
+  const canClockInAgain = todayRecord?.timeOut && 
+    (new Date() - new Date(todayRecord.timeOut.toDate ? todayRecord.timeOut.toDate() : todayRecord.timeOut)) > (60 * 60 * 1000);
 
   return (
     <div className="container">
@@ -265,6 +381,14 @@ function StaffDashboard({ user }) {
             disabled={clocking}
           >
             {clocking ? 'Getting Location...' : '🔴 Clock Out'}
+          </button>
+        ) : canClockInAgain ? (
+          <button 
+            className="clock-btn clock-in" 
+            onClick={() => handleClock('clockIn')}
+            disabled={clocking}
+          >
+            {clocking ? 'Getting Location...' : '🟢 Clock In (New Session)'}
           </button>
         ) : (
           <p className="status-text">✓ Today's attendance complete</p>
