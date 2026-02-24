@@ -29,11 +29,16 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 const googleProvider = new GoogleAuthProvider();
 
-// Helper: Get today's date string
-const getTodayDate = () => {
-  const now = new Date();
-  return now.toISOString().split('T')[0];
+// Helper: Format date to YYYY-MM-DD (local time)
+const formatDateLocal = (date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 };
+
+// Helper: Get today's date string (local time)
+const getTodayDate = () => formatDateLocal(new Date());
 
 // Helper: Format time
 const formatTime = (timestamp) => {
@@ -274,7 +279,7 @@ function StaffDashboard({ user }) {
       } else {
         // Clock out - check if overnight split needed
         const clockInTime = todayRecord.timeIn.toDate ? todayRecord.timeIn.toDate() : new Date(todayRecord.timeIn);
-        const clockInDate = clockInTime.toISOString().split('T')[0];
+        const clockInDate = formatDateLocal(clockInTime);
         
         // If clock out is on a different date than clock in, split into two records
         if (clockInDate !== today) {
@@ -444,8 +449,8 @@ function AdminPanel({ user }) {
     const thirtyDaysAgo = new Date(today);
     thirtyDaysAgo.setDate(today.getDate() - 30);
     
-    setEndDate(today.toISOString().split('T')[0]);
-    setStartDate(thirtyDaysAgo.toISOString().split('T')[0]);
+    setEndDate(formatDateLocal(today));
+    setStartDate(formatDateLocal(thirtyDaysAgo));
   }, []);
 
   useEffect(() => {
@@ -488,6 +493,7 @@ function AdminPanel({ user }) {
     const data = records.map(record => ({
       'Date': record.date,
       'STAFF': record.name,
+      'Email': record.email,
       'IN': record.timeIn ? formatTime(record.timeIn) : '',
       'OUT': record.timeOut ? formatTime(record.timeOut) : '',
       'Location In': record.locationIn ? 
@@ -504,6 +510,7 @@ function AdminPanel({ user }) {
     ws['!cols'] = [
       { wch: 12 }, // Date
       { wch: 20 }, // STAFF
+      { wch: 30 }, // Email
       { wch: 10 }, // IN
       { wch: 10 }, // OUT
       { wch: 25 }, // Location In
